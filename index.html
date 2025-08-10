@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ClockIn</title>
+    <!-- Tailwind CDN for quick styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Enable dark mode based on class
+      tailwind.config = { darkMode: 'class' };
+    </script>
+    <!-- Leaflet CSS -->
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css"
+      integrity="sha256-Yd8uXn+VJQlFZH06/Mp9cJQfQw40V4gy7xSPGDWS7DI="
+      crossorigin=""
+    />
+    <link rel="manifest" href="/manifest.json" />
+  </head>
+  <body class="dark:bg-gray-900 dark:text-gray-100">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
