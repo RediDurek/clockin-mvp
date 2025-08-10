@@ -1,99 +1,90 @@
-import React, { useEffect, useState } from 'react';
-import type { Site } from '../adapters/StorageAdapter';
-import { isInsideRadius } from '../utils/geo';
+import React, { useEffect, useRef, useState } from 'react';
+import type { Site } from '../types';
 
-// Because Leaflet uses window, we lazy load react-leaflet in the browser only.
-const MapView: React.FC<{
+const L = () => import('leaflet');
+
+export const MapView: React.FC<{
   sites: Site[];
-  selectedSite: Site | null;
-  onSelectSite: (site: Site) => void;
-  userPosition: [number, number] | null;
-  onWithinRadiusChange?: (within: boolean) => void;
-}> = ({ sites, selectedSite, onSelectSite, userPosition, onWithinRadiusChange }) => {
-  const [RL, setRL] = useState<any>(null);
-  const [L, setL] = useState<any>(null);
+  selectedId?: string;
+  onSelect: (id: string) => void;
+  userPos?: { lat: number; lng: number } | null;
+}> = ({ sites, selectedId, onSelect, userPos }) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [map, setMap] = useState<any>(null);
+  const userMarkerRef = useRef<any>(null);
+  const markersRef = useRef<any[]>([]);
+  const circlesRef = useRef<any[]>([]);
 
-  // Load modules client-side
+  // init
   useEffect(() => {
-    let mounted = true;
+    let mapInst: any;
+    let leaflet: any;
+
     (async () => {
-      const [reactLeaflet, leaflet] = await Promise.all([
-        import('react-leaflet'),
-        import('leaflet'),
-      ]);
-      // Fix default icon paths when using parcel/vite
-      // @ts-ignore
-      delete leaflet.Icon.Default.prototype._getIconUrl;
-      leaflet.Icon.Default.mergeOptions({
-        iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon-2x.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
+      leaflet = (await L()).default;
+      if (!ref.current) return;
+
+      const startLat = sites[0]?.lat ?? 45;
+      const startLng = sites[0]?.lng ?? 11;
+
+      mapInst = leaflet.map(ref.current, { zoomControl: true }).setView([startLat, startLng], 13);
+      leaflet
+        .tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' })
+        .addTo(mapInst);
+
+      // markers + geofence
+      sites.forEach((s) => {
+        const m = leaflet.marker([s.lat, s.lng]).addTo(mapInst).on('click', () => onSelect(s.id));
+        markersRef.current.push(m);
+        const c = leaflet.circle([s.lat, s.lng], { radius: s.radius_meters, color: '#38bdf8' }).addTo(mapInst);
+        circlesRef.current.push(c);
       });
-      if (mounted) {
-        setRL(reactLeaflet);
-        setL(leaflet);
-      }
+
+      setMap(mapInst);
+
+      // importante: sistema le dimensioni dopo il mount
+      setTimeout(() => mapInst.invalidateSize(), 0);
     })();
+
     return () => {
-      mounted = false;
+      // cleanup completo
+      markersRef.current.forEach((m) => m.remove());
+      circlesRef.current.forEach((c) => c.remove());
+      markersRef.current = [];
+      circlesRef.current = [];
+      mapInst?.remove();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Compute geofence check whenever user position or selected site changes
+  // ridisegna marker utente senza crearne di nuovi ogni volta
   useEffect(() => {
-    if (!selectedSite || !userPosition || !onWithinRadiusChange) return;
-    const within = isInsideRadius(
-      userPosition[0],
-      userPosition[1],
-      selectedSite.lat,
-      selectedSite.lng,
-      selectedSite.radius,
-    );
-    onWithinRadiusChange(within);
-  }, [selectedSite, userPosition, onWithinRadiusChange]);
+    if (!map || !userPos) return;
+    (async () => {
+      const leaflet = (await L()).default;
+      if (userMarkerRef.current) {
+        userMarkerRef.current.setLatLng([userPos.lat, userPos.lng]);
+      } else {
+        userMarkerRef.current = leaflet
+          .circleMarker([userPos.lat, userPos.lng], { radius: 6, color: '#22d3ee' })
+          .addTo(map);
+      }
+    })();
+  }, [map, userPos]);
 
-  if (!RL || !L) return <div className="flex items-center justify-center h-64">Loading map...</div>;
-
-  const { MapContainer, TileLayer, Marker, Circle, Popup } = RL;
-  const center =
-    userPosition ??
-    (selectedSite ? [selectedSite.lat, selectedSite.lng] : [45.4064, 11.8777]) as [number, number];
+  // reagisci ai resize (iOS/Android barra indirizzi)
+  useEffect(() => {
+    if (!map) return;
+    const h = () => map.invalidateSize();
+    window.addEventListener('resize', h);
+    return () => window.removeEventListener('resize', h);
+  }, [map]);
 
   return (
-    <MapContainer center={center} zoom={16} style={{ height: '300px', width: '100%' }}>
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution="&copy; OpenStreetMap contributors"
-      />
-      {sites.map(site => (
-        <Marker
-          key={site.id}
-          position={[site.lat, site.lng] as [number, number]}
-          eventHandlers={{
-            click: () => onSelectSite(site),
-          }}
-        >
-          <Popup>
-            <div className="text-sm">
-              <strong>{site.name}</strong>
-            </div>
-          </Popup>
-        </Marker>
-      ))}
-      {selectedSite && (
-        <Circle
-          center={[selectedSite.lat, selectedSite.lng] as [number, number]}
-          radius={selectedSite.radius}
-          pathOptions={{ color: 'blue', fillColor: 'blue', fillOpacity: 0.1 }}
-        />
-      )}
-      {userPosition && (
-        <Marker position={userPosition as [number, number]}>
-          <Popup>You are here</Popup>
-        </Marker>
-      )}
-    </MapContainer>
+    <div
+      ref={ref}
+      className="h-72 w-full rounded-2xl overflow-hidden border border-white/10"
+      /* su mobile puoi fare h-64 se vuoi la card più compatta */
+    />
   );
 };
-
-export default MapView;
